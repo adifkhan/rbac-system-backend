@@ -1,6 +1,19 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import { UserService } from './user.service';
-import { CreateUserDto, UpdateUserDto, UpdateUserPermissionsDto } from './dto/user.dto';
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UpdateUserPermissionsDto,
+} from './dto/user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
 import { Permission } from '../common/decorators/permission.decorator';
@@ -11,9 +24,9 @@ export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Post()
-  @UseGuards(PermissionGuard)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   @Permission('users:create')
-  create(@Body() createUserDto: CreateUserDto, @Req() req) {
+  async create(@Body() createUserDto: CreateUserDto, @Req() req) {
     return this.userService.create(createUserDto, req.user.id);
   }
 
@@ -60,6 +73,10 @@ export class UserController {
     @Body() updatePermissionsDto: UpdateUserPermissionsDto,
     @Req() req,
   ) {
-    return this.userService.updatePermissions(id, updatePermissionsDto, req.user.id);
+    return this.userService.updatePermissions(
+      id,
+      updatePermissionsDto,
+      req.user.id,
+    );
   }
 }

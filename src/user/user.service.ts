@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateUserDto,
@@ -12,35 +16,69 @@ export class UserService {
   constructor(private prisma: PrismaService) {}
 
   async create(createUserDto: CreateUserDto, creatorId: string) {
-    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    try {
+      const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
-    // Get default role if not provided
-    let roleId = createUserDto.roleId;
-    if (!roleId) {
-      const defaultRole = await this.prisma.role.findFirst({
-        where: { name: 'Agent' },
+      // Get default role if not provided
+      let roleId = createUserDto.roleId;
+      if (!roleId) {
+        const defaultRole = await this.prisma.role.findFirst({
+          where: { name: 'Agent' },
+        });
+        roleId = defaultRole?.id;
+      }
+
+      if (!roleId) {
+        throw new NotFoundException('Default role not found');
+      }
+
+      // Check if user already exists
+      const existingUser = await this.prisma.user.findUnique({
+        where: { email: createUserDto.email },
       });
-      roleId = defaultRole?.id;
+
+      if (existingUser) {
+        throw new ConflictException('User with this email already exists');
+      }
+
+      // Create user
+      const user = await this.prisma.user.create({
+        data: {
+          email: createUserDto.email,
+          password: hashedPassword,
+          firstName: createUserDto.firstName,
+          lastName: createUserDto.lastName,
+          roleId: roleId,
+          createdById: creatorId,
+          isActive: true,
+        },
+        include: {
+          role: true,
+          creator: true,
+        },
+      });
+
+      // Log the creation
+      await this.prisma.auditLog.create({
+        data: {
+          userId: creatorId,
+          action: 'USER_CREATED',
+          entityType: 'USER',
+          entityId: user.id,
+          newValues: {
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            role: user.role?.name,
+          },
+        },
+      });
+
+      delete user.password;
+      return user;
+    } catch (error) {
+      throw error;
     }
-
-    // Create user - Option 1: Use create with direct field assignments
-    const user = await this.prisma.user.create({
-      data: {
-        email: createUserDto.email,
-        password: hashedPassword,
-        firstName: createUserDto.firstName,
-        lastName: createUserDto.lastName,
-        roleId: roleId, // Direct foreign key assignment instead of nested connect
-        createdById: creatorId,
-      },
-      include: {
-        role: true,
-        creator: true,
-      },
-    });
-
-    delete user.password;
-    return user;
   }
 
   async findAll() {
@@ -88,17 +126,7 @@ export class UserService {
   }
 
   async update(id: string, updateUserDto: UpdateUserDto) {
-    // Create a clean update object
-    const updateData: any = {};
-
-    if (updateUserDto.email) updateData.email = updateUserDto.email;
-    if (updateUserDto.firstName) updateData.firstName = updateUserDto.firstName;
-    if (updateUserDto.lastName) updateData.lastName = updateUserDto.lastName;
-    if (updateUserDto.isActive !== undefined)
-      updateData.isActive = updateUserDto.isActive;
-    if (updateUserDto.isBanned !== undefined)
-      updateData.isBanned = updateUserDto.isBanned;
-    if (updateUserDto.roleId) updateData.roleId = updateUserDto.roleId; // Direct assignment
+    const updateData: any = { ...updateUserDto };
 
     const user = await this.prisma.user.update({
       where: { id },
@@ -119,7 +147,6 @@ export class UserService {
       data: { isActive: false },
     });
 
-    // Log the suspension
     await this.prisma.auditLog.create({
       data: {
         userId: id,
@@ -130,6 +157,24 @@ export class UserService {
     });
 
     return { message: 'User suspended successfully' };
+  }
+
+  async activate(id: string) {
+    await this.prisma.user.update({
+      where: { id },
+      data: { isActive: true },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: id,
+        action: 'USER_ACTIVATED',
+        entityType: 'USER',
+        entityId: id,
+      },
+    });
+
+    return { message: 'User activated successfully' };
   }
 
   async ban(id: string) {
@@ -150,24 +195,6 @@ export class UserService {
     return { message: 'User banned successfully' };
   }
 
-  async activate(id: string) {
-    await this.prisma.user.update({
-      where: { id },
-      data: { isActive: true, isBanned: false },
-    });
-
-    await this.prisma.auditLog.create({
-      data: {
-        userId: id,
-        action: 'USER_ACTIVATED',
-        entityType: 'USER',
-        entityId: id,
-      },
-    });
-
-    return { message: 'User activated successfully' };
-  }
-
   async updatePermissions(
     id: string,
     updatePermissionsDto: UpdateUserPermissionsDto,
@@ -184,8 +211,6 @@ export class UserService {
         data: updatePermissionsDto.permissionIds.map((permissionId) => ({
           userId: id,
           permissionId: permissionId,
-          // If your UserPermission model has grantedById, uncomment this line
-          // grantedById: grantedById,
         })),
       });
     }
@@ -223,37 +248,5 @@ export class UserService {
     } catch (error) {
       throw new NotFoundException('User not found');
     }
-  }
-
-  async getPermissions(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-      include: {
-        role: {
-          include: {
-            permissions: {
-              include: { permission: true },
-            },
-          },
-        },
-        permissions: {
-          include: { permission: true },
-        },
-      },
-    });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // Combine role permissions and direct permissions
-    const rolePermissions = user.role.permissions.map((rp) => rp.permission);
-    const directPermissions = user.permissions.map((up) => up.permission);
-
-    return {
-      rolePermissions,
-      directPermissions,
-      allPermissions: [...rolePermissions, ...directPermissions],
-    };
   }
 }

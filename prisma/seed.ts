@@ -139,7 +139,6 @@ async function main() {
       create: perm,
     });
   }
-  console.log('Permissions created');
 
   // Create roles
   console.log('Creating roles...');
@@ -178,7 +177,6 @@ async function main() {
       description: 'Customer portal access',
     },
   });
-  console.log('Roles created');
 
   // Assign all permissions to Admin
   console.log('Assigning permissions to Admin role...');
@@ -331,7 +329,6 @@ async function main() {
     },
   });
 
-  console.log('Users created');
   console.log('Seed completed successfully!');
 }
 

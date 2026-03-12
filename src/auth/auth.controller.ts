@@ -49,6 +49,6 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   async getProfile(@Req() req: Request) {
-    return req.user; // This should return the user object from JWT strategy
+    return req.user;
   }
 }

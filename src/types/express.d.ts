@@ -14,12 +14,3 @@ declare global {
     }
   }
 }
-
-// # Run migrations
-// npx prisma migrate dev --name init
-
-// # Seed the database
-// npm run prisma:seed
-
-// # Start the backend
-// npm run start:dev

@@ -1,4 +1,9 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -20,26 +25,48 @@ export class PermissionGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest();
-    const user = request.user;
+    const currentUser = request.user;
 
-    if (!user) {
+    if (!currentUser) {
       throw new ForbiddenException();
     }
 
     // Check if user has the required permission
-    if (!user.permissions.includes(requiredPermission)) {
+    if (!currentUser.permissions.includes(requiredPermission)) {
       throw new ForbiddenException('Insufficient permissions');
     }
 
-    // For grant operations, check grant ceiling
-    if (request.method === 'POST' && request.body.permissionIds) {
-      const permissionsToGrant = request.body.permissionIds;
-      const hasAllPermissions = permissionsToGrant.every(p => 
-        user.permissions.includes(p)
-      );
-      
-      if (!hasAllPermissions) {
-        throw new ForbiddenException('Cannot grant permissions you do not hold');
+    // For create user operation, check grant ceiling
+    if (request.method === 'POST' && request.path.includes('/users')) {
+      const { role } = request.body;
+
+      if (role) {
+        // Get the role's permissions
+        const roleData = await this.prisma.role.findUnique({
+          where: { name: role },
+          include: {
+            permissions: {
+              include: { permission: true },
+            },
+          },
+        });
+
+        if (roleData) {
+          const rolePermissions = roleData.permissions.map(
+            (rp) => rp.permission.name,
+          );
+
+          // Check if current user has all permissions of the role they're trying to assign
+          const hasAllPermissions = rolePermissions.every((perm) =>
+            currentUser.permissions.includes(perm),
+          );
+
+          if (!hasAllPermissions) {
+            throw new ForbiddenException(
+              'Cannot assign a role with permissions you do not have',
+            );
+          }
+        }
       }
     }
 
